@@ -1720,7 +1720,8 @@ class KerasTopologyCorrectnessTest(KerasNumericCorrectnessTest):
         z = concatenate([y1, y3])
         model = Model(inputs=[x], outputs=[z])
 
-        model.set_weights([np.random.rand(*w.shape) for w in model.get_weights()])
+        model.set_weights([np.random.rand(*w.shape) for w in 
+                model.get_weights()])
         self._test_keras_model(model, mode = 'random', delta=1e-4)
     
     def test_tiny_multiple_outputs(self):
@@ -1729,9 +1730,20 @@ class KerasTopologyCorrectnessTest(KerasNumericCorrectnessTest):
         y2 = Dense(5)(x)
         model = Model([x], [y1,y2])
         
-        model.set_weights([np.random.rand(*w.shape) for w in model.get_weights()])
+        model.set_weights([np.random.rand(*w.shape) for w in 
+                model.get_weights()])
         self._test_keras_model(model, mode = 'random', delta=1e-4)
 
+    def test_tiny_seqs_merge_on_channels(self):
+        x1 = Input(shape=(2,3))
+        x2 = Input(shape=(2,4))
+        y = concatenate([x1, x2])
+        model = Model([x1,x2], [y])
+        
+        model.set_weights([np.random.rand(*w.shape) for w in 
+                model.get_weights()])
+        self._test_keras_model(model, mode = 'random', delta=1e-4)
+        
     
     def test_tiny_mobilenet_arch(self):
         

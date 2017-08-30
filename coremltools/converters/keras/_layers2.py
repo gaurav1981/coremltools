@@ -69,17 +69,30 @@ def _get_elementwise_name_from_keras_layer(keras_layer):
     elif isinstance(keras_layer, _keras.layers.Multiply):
         return 'MULTIPLY'
     elif isinstance(keras_layer, _keras.layers.Concatenate):
-        if len(keras_layer.input_shape[0]) == 3 and (keras_layer.axis == 1 or keras_layer.axis == -2):
-            return 'SEQUENCE_CONCAT'
-        elif len(keras_layer.input_shape[0]) == 4 and (keras_layer.axis == 3 or keras_layer.axis == -1):
+        shape = keras_layer.input_shape[0]
+        axis = keras_layer.axis
+        if len(shape) == 3:
+            if axis == 1 or axis == -2:
+                # (N,S,D), concat on sequence
+                return 'SEQUENCE_CONCAT'
+            elif axis == -1 or axis == 2:
+                # (N,S,D), concat on channel
+                return 'CONCAT'
+        elif len(shape) == 4 and (axis == 3 or axis == -1):
+            # (N,H,W,C), concat on channel
             return 'CONCAT'
-        elif len(keras_layer.input_shape[0]) == 2 and (keras_layer.axis == 1 or keras_layer.axis == -1):
+        elif len(shape) == 2 and (axis == 1 or axis == -1):
+            # (N,C), concat on channel
             return 'CONCAT'
         else:
-            raise ValueError('Only channel and sequence concatenation are supported.')
+            option = "input_shape = %s, concat_axis = %s" % (str(shape), 
+                    str(axis))
+            _utils.raise_error_unsupported_option(option, mode, 
+                    keras_layer.name)
     elif isinstance(keras_layer, _keras.layers.Dot):
         if len(keras_layer.input_shape[0]) == 2:
-            if type(keras_layer.axes) is list or type(keras_layer.axes) is tuple:
+            if (type(keras_layer.axes) is list or type(keras_layer.axes) is 
+                    tuple):
                 if len(keras_layer.axes) > 1: 
                     raise ValueError('Only vector dot-product is supported.')
                 else:
