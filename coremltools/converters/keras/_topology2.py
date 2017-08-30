@@ -1,5 +1,6 @@
 import keras as _keras
 import numpy as _np
+import six as _six
 
 _KERAS_LAYERS_1D = [
     _keras.layers.Conv1D,
@@ -71,7 +72,7 @@ class NetGraph(object):
     """
     def __init__(self, model):
         self.layer_list = []
-        self.edge_map = {}
+        self.edge_map = {} # dict src: [snk_1, snk_2, ..., snk_n]
         self.reverse_edge_map = {}
         self.keras_layer_map = {}
         
@@ -111,12 +112,31 @@ class NetGraph(object):
     def get_keras_layer(self, layer_name):
         return self.keras_layer_map[layer_name]
     
+    def _get_layer_from_keras(self, keras_layer):
+        for key in self.keras_layer_map:
+            if self.keras_layer_map[key] == keras_layer:
+                return key
+        return None
+    
+    def _get_fused_activation(self, k_layer):
+        if (isinstance(k_layer, _keras.layers.TimeDistributed)):
+            k_layer = k_layer.layer
+        if (isinstance(k_layer, _keras.layers.convolutional.Convolution2D) or 
+            isinstance(k_layer, _keras.layers.convolutional.Convolution1D) or 
+            isinstance(k_layer, _keras.layers.core.Dense)):
+            if _six.PY2:
+                func_name = k_layer.activation.func_name
+            else:
+                func_name = k_layer.activation.__name__
+            return func_name
+        return None
+    
     def make_input_layers(self):
         """
         Extract the ordering of the input layers. 
         """
         self.input_layers = []
-        if hasattr(self.model, 'input_layers'):
+        if hasattr(self.model, 'input_layers'): # for keras.Models
             input_keras_layers = self.model.input_layers[:]
             self.input_layers = [None] * len(input_keras_layers)
             for layer in self.layer_list: 
@@ -125,7 +145,7 @@ class NetGraph(object):
                     if keras_layer in input_keras_layers:
                         idx = input_keras_layers.index(keras_layer)
                         self.input_layers[idx] = layer
-        elif len(self.model.inbound_nodes) <= 1: 
+        elif len(self.model.inbound_nodes) <= 1: # for keras.Sequential
             for ts in _to_list(self.model.input): 
                 # search for the InputLayer that matches this ts
                 for l in self.layer_list: 
@@ -145,10 +165,28 @@ class NetGraph(object):
         # However, because the possibility of having inserted layers, 
         # it's more difficult to tell which layer is the output layer. 
         # Once possible way is to keep track of newly added layers... 
+        
+        # This should be called after layer is defused
         self.output_layers = []
-        for layer in self.layer_list:
-            if len(self.get_successors(layer)) == 0: 
-                self.output_layers.append(layer)
+        if hasattr(self.model, 'output_layers'): # for keras.Models
+            for k_out_layer in self.model.output_layers:
+                c_out_layer = self._get_layer_from_keras(k_out_layer)
+                if c_out_layer is not None:
+                    act_type = self._get_fused_activation(k_out_layer)
+                    if act_type is not None and act_type != 'linear':
+                        # fused activation
+                        from nose.tools import set_trace
+                        set_trace()
+                        act_layer = self.get_successors(c_out_layer)[0]
+                        self.output_layers.append(act_layer)
+                    else: 
+                        # no fused activation
+                        self.output_layers.append(c_out_layer)
+        else: # for keras.Sequential
+            for layer in self.layer_list:
+                if len(self.get_successors(layer)) == 0: 
+                    self.output_layers.append(layer)
+
     
     def get_input_layers(self):
         return self.input_layers
@@ -215,7 +253,12 @@ class NetGraph(object):
             print('Output name length mismatch')
             return
         for i, out_layer in enumerate(self.output_layers):
+            old_blob_name = self.layers_outputs[out_layer][0]
             new_blob_name = new_names[i]
+            succs = self.get_successors(out_layer)
+            for succ in succs:
+                idx = self.layers_inputs[succ].index(old_blob_name)
+                self.layers_inputs[succ][idx] = new_blob_name
             self.layers_outputs[out_layer][0] = new_blob_name
     
     # need to update both layer's in/out list and graph in/out ports
@@ -412,26 +455,15 @@ class NetGraph(object):
         while idx < nb_layers:
             layer = self.layer_list[idx]
             k_layer = self.keras_layer_map[layer]
-            if (isinstance(k_layer, _keras.layers.TimeDistributed)):
-                k_layer = k_layer.layer
-            if (isinstance(k_layer, _keras.layers.convolutional.Convolution2D) or 
-                isinstance(k_layer, _keras.layers.convolutional.Convolution1D) or 
-                isinstance(k_layer, _keras.layers.core.Dense)):
-
-                import six
-                if six.PY2:
-                    func_name = k_layer.activation.func_name
-                else:
-                    func_name = k_layer.activation.__name__
-
-                if func_name != 'linear':
-                    # Create new layer
-                    new_layer = layer + '__activation__'
-                    new_keras_layer = _keras.layers.core.Activation(func_name)
-                    # insert new layer after it
-                    self._insert_layer_after(idx, new_layer, new_keras_layer)
-                    idx += 1
-                    nb_layers += 1
+            act_type = self._get_fused_activation(k_layer)
+            if act_type is not None and act_type != 'linear':
+                # Create new layer
+                new_layer = layer + '__activation__'
+                new_keras_layer = _keras.layers.core.Activation(func_name)
+                # insert new layer after it
+                self._insert_layer_after(idx, new_layer, new_keras_layer)
+                idx += 1
+                nb_layers += 1
             idx += 1
     
     def is_activation(self,layer):

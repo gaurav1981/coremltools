@@ -1744,6 +1744,15 @@ class KerasTopologyCorrectnessTest(KerasNumericCorrectnessTest):
                 model.get_weights()])
         self._test_keras_model(model, mode = 'random', delta=1e-4)
         
+    def test_tiny_internal_blob_as_output(self):
+        x = Input(shape=(3,))
+        y = Dense(4)(x)
+        z = Dense(5)(y)
+        model = Model([x], [y,z])
+        
+        model.set_weights([np.random.rand(*w.shape) for w in 
+                model.get_weights()])
+        self._test_keras_model(model, mode = 'random', delta=1e-4)
     
     def test_tiny_mobilenet_arch(self):
         
