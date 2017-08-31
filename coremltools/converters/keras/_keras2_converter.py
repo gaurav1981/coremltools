@@ -176,6 +176,9 @@ def _convert(model,
     inputs = graph.get_input_layers()
     outputs = graph.get_output_layers()
     
+    from nose.tools import set_trace
+    set_trace()
+    
     # check input / output names validity
     if input_names is not None: 
         if isinstance(input_names, _string_types):

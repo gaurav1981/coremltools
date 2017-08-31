@@ -131,6 +131,13 @@ class NetGraph(object):
             return func_name
         return None
     
+    def _is_1d_layer(self,layer):
+        keras_layer = self.keras_layer_map[layer]
+        for layer_type in _KERAS_LAYERS_1D:
+            if isinstance(keras_layer, layer_type):
+                return True
+        return False
+
     def make_input_layers(self):
         """
         Extract the ordering of the input layers. 
@@ -150,7 +157,8 @@ class NetGraph(object):
                 # search for the InputLayer that matches this ts
                 for l in self.layer_list: 
                     kl = self.keras_layer_map[l]
-                    if isinstance(kl, _keras.engine.topology.InputLayer) and kl.input == ts: 
+                    if isinstance(kl, _keras.engine.topology.InputLayer) and \
+                            kl.input == ts: 
                         self.input_layers.append(l)
         else: 
             raise ValueError("Input values cannot be identified.")
@@ -169,14 +177,16 @@ class NetGraph(object):
         # This should be called after layer is defused
         self.output_layers = []
         if hasattr(self.model, 'output_layers'): # for keras.Models
+            from nose.tools import set_trace
+            set_trace()
             for k_out_layer in self.model.output_layers:
                 c_out_layer = self._get_layer_from_keras(k_out_layer)
                 if c_out_layer is not None:
                     act_type = self._get_fused_activation(k_out_layer)
                     if act_type is not None and act_type != 'linear':
                         # fused activation
-                        from nose.tools import set_trace
-                        set_trace()
+                        # from nose.tools import set_trace
+                        # set_trace()
                         act_layer = self.get_successors(c_out_layer)[0]
                         self.output_layers.append(act_layer)
                     else: 
@@ -186,7 +196,8 @@ class NetGraph(object):
             for layer in self.layer_list:
                 if len(self.get_successors(layer)) == 0: 
                     self.output_layers.append(layer)
-
+            from nose.tools import set_trace
+            set_trace()
     
     def get_input_layers(self):
         return self.input_layers
@@ -459,7 +470,7 @@ class NetGraph(object):
             if act_type is not None and act_type != 'linear':
                 # Create new layer
                 new_layer = layer + '__activation__'
-                new_keras_layer = _keras.layers.core.Activation(func_name)
+                new_keras_layer = _keras.layers.core.Activation(act_type)
                 # insert new layer after it
                 self._insert_layer_after(idx, new_layer, new_keras_layer)
                 idx += 1
@@ -473,13 +484,6 @@ class NetGraph(object):
                 return True
         return False
     
-    def is_1d_layer(self,layer):
-        keras_layer = self.keras_layer_map[layer]
-        for layer_type in _KERAS_LAYERS_1D:
-            if isinstance(keras_layer, layer_type):
-                return True
-        return False
-    
     def _get_1d_interface_edges(self):
         """
         Get edges that represents transition from not 1D to 1D, and 1D to not 1D
@@ -488,7 +492,7 @@ class NetGraph(object):
         """
         in_edges = []
         for layer in self.layer_list: 
-            if not self.is_1d_layer(layer):
+            if not self._is_1d_layer(layer):
                 continue
             preds = self.get_predecessors(layer)
             if len(preds) == 0:
@@ -500,19 +504,19 @@ class NetGraph(object):
                     preds = self.get_predecessors(u)
                     v = u
                     u = preds[0] if len(preds) > 0 else None
-                if u is None or (not self.is_1d_layer(u)):
+                if u is None or (not self._is_1d_layer(u)):
                     in_edges.append((u, v))
 
         out_edges = []
         for layer in self.layer_list: 
-            if not self.is_1d_layer(layer):
+            if not self._is_1d_layer(layer):
                 continue
             succs = self.get_successors(layer)
             if len(succs) == 0:
                 out_edges.append((layer, None))
             elif not self.is_activation(succs[0]):
                 for succ in succs: 
-                    if not self.is_1d_layer(succ):
+                    if not self._is_1d_layer(succ):
                         out_edges.append((layer, succ))
             else: 
                 act_layer = succs[0]
@@ -521,7 +525,7 @@ class NetGraph(object):
                     out_edges.append((act_layer, None))
                 else: 
                     for succ in succs: 
-                        if not self.is_1d_layer(succ):
+                        if not self._is_1d_layer(succ):
                             out_edges.append((act_layer, succ))
 
         return in_edges, out_edges
@@ -625,56 +629,7 @@ class NetGraph(object):
             self.keras_layer_map.pop(layer)
             idx = self._get_first_shared_layer()
         
-        # Expand the sub-models
-        idx = self._get_first_embedded_model()
-        while idx >= 0:
-            # grab the input and output edges of the embedded model
-            embedded_model = self.layer_list[idx]
-            # build the embedded model
-            embedded_keras_model = self.keras_layer_map[embedded_model]
-            embedded_graph = NetGraph(embedded_keras_model)
-            embedded_graph.build()
-            # replace the embedded model with the layers of the embedded graph
-            embedded_layer_list = embedded_graph.layer_list
-            new_layer_list = []
-            for embedded_layer_name in embedded_layer_list:
-                new_layer_name = embedded_model + '_' + embedded_layer_name
-                new_layer_list.append(new_layer_name)
-                self.keras_layer_map[new_layer_name] = embedded_graph.keras_layer_map[embedded_layer_name]
-                # add edge [embed_layer -> its succ]
-                embedded_successors = embedded_graph.get_successors(embedded_layer_name)
-                for embed_succ_name in embedded_successors:
-                    new_embed_succ_name = embedded_model + '_' + embed_succ_name
-                    self._add_edge(new_layer_name, new_embed_succ_name)
-                # add edge [pred -> embed_layer]
-                embedded_predecessors = embedded_graph.get_predecessors(embedded_layer_name)
-                for embed_pred_name in embedded_predecessors: 
-                    new_embed_pred_name = embedded_model + '_' + embed_pred_name
-                    self._add_edge(new_embed_pred_name, new_layer_name)
-            
-            self.layer_list[idx+1:idx+1] = new_layer_list
-            # replace input / output edges to the model with input/output edges of the embedded layers
-            predecessors = self.get_predecessors(embedded_model)
-            embedded_inputs = embedded_graph.get_input_layers()
-            for i, pred in enumerate(predecessors): 
-                embed_input = embedded_inputs[i]
-                new_embed_input = embedded_model + '_' + embed_input
-                self._add_edge(pred, new_embed_input)
-                
-            embedded_outputs = embedded_graph.get_output_layers()
-            successors = self.get_successors(embedded_model)
-            for i, succ in enumerate(successors):
-                embed_output = embedded_outputs[i]
-                new_embed_output = embedded_model + '_' + embed_output
-
-                self._add_edge(new_embed_output, succ)
-                
-            # clear up the embedded model
-            self._remove_layer(embedded_model)
-            idx = self._get_first_embedded_model()
-        
         self.make_input_layers()
-        self.make_output_layers()
     
     def print_layer_list(self):
         print('\n')
