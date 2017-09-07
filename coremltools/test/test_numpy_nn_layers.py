@@ -739,19 +739,16 @@ class SimpleTest(CorrectnessTest):
             shutil.rmtree(model_dir)
             
              
-    def test_padding_reflection(self):
+    def test_reshape_target_shape_3(self):
         
         #create a tiny mlmodel
-        input_dim = (1,2,3)
+        input_dim = (1,2,5) #(C,H,W) 
         input_features = [('data', datatypes.Array(*input_dim))]
         output_features = [('output', None)]
                 
         builder = neural_network.NeuralNetworkBuilder(input_features, output_features)
                 
-        builder.add_padding(name = 'pad', 
-                            left = 1, top = 1, 
-                            input_name = 'data',
-                            output_name = 'output', padding_type = 'reflection')
+        builder.add_reshape(name = 'reshape', input_name = 'data', output_name = 'output', target_shape = (10,1,1), mode = 0)
                         
         #save the model
         model_dir = tempfile.mkdtemp()
@@ -760,18 +757,118 @@ class SimpleTest(CorrectnessTest):
         
         #preprare input and get predictions
         coreml_model = coremltools.models.MLModel(model_path)
-        x = np.reshape(np.array([[1,2,3], [4,5,6]]), (1,2,3)).astype(np.float32)
+        x = np.random.rand(*input_dim)
         coreml_input = {'data': x}
         coreml_preds = coreml_model.predict(coreml_input)['output']
         
         #harcoded for this simple test case
-        numpy_preds = np.reshape(np.array([[5,4,5,6], [2,1,2,3], [5,4,5,6]]), (1,3,4)).astype(np.float32)
+        numpy_preds = np.reshape(x, (10,1,1))
+        self.assertTrue(self._compare_shapes(numpy_preds, coreml_preds))
+        self.assertTrue(self._compare_predictions(numpy_preds, coreml_preds))
+        
+        if os.path.exists(model_dir):
+            shutil.rmtree(model_dir) 
+            
+    def test_reshape_target_shape_4(self):
+        
+        #create a tiny mlmodel
+        input_dim = (1,2,5) #(C,H,W) 
+        input_features = [('data', datatypes.Array(*input_dim))]
+        output_features = [('output', None)]
+                
+        builder = neural_network.NeuralNetworkBuilder(input_features, output_features)
+                
+        builder.add_reshape(name = 'reshape', input_name = 'data', output_name = 'output', target_shape = (1,10,1,1), mode = 0)
+                        
+        #save the model
+        model_dir = tempfile.mkdtemp()
+        model_path = os.path.join(model_dir, 'test_layer.mlmodel')                        
+        coremltools.utils.save_spec(builder.spec, model_path)
+        
+        #preprare input and get predictions
+        coreml_model = coremltools.models.MLModel(model_path)
+        x = np.random.rand(*input_dim)
+        coreml_input = {'data': x}
+        coreml_preds = coreml_model.predict(coreml_input)['output']
+        
+        #harcoded for this simple test case
+        numpy_preds = np.reshape(x, (1,10,1,1))
+        self.assertTrue(self._compare_shapes(numpy_preds, coreml_preds))
+        self.assertTrue(self._compare_predictions(numpy_preds, coreml_preds))
+        
+        if os.path.exists(model_dir):
+            shutil.rmtree(model_dir)           
+            
+                
+class SimpleTestCPUOnly(CorrectnessTest):
+    
+    def test_bias_matrix_CPU(self):
+        
+        #create a tiny mlmodel
+        input_dim = (1,2,2)
+        input_features = [('data', datatypes.Array(*input_dim))]
+        output_features = [('output', None)]
+                
+        builder = neural_network.NeuralNetworkBuilder(input_features, output_features)
+        
+        b = np.reshape(np.arange(5,9), (1,2,2))
+                
+        builder.add_bias(name = 'bias', b = b, input_name = 'data', output_name = 'output',
+                            shape_bias = [1,2,2])
+                        
+        #save the model
+        model_dir = tempfile.mkdtemp()
+        model_path = os.path.join(model_dir, 'test_layer.mlmodel')                        
+        coremltools.utils.save_spec(builder.spec, model_path)
+        
+        #preprare input and get predictions
+        coreml_model = coremltools.models.MLModel(model_path)
+        x = np.reshape(np.arange(4, dtype=np.float32), (1,2,2))
+        coreml_input = {'data': x}
+        coreml_preds = coreml_model.predict(coreml_input, useCPUOnly = True)['output']
+        
+        #harcoded for this simple test case
+        numpy_preds = x + b
+        self.assertTrue(self._compare_shapes(numpy_preds, coreml_preds))
+        self.assertTrue(self._compare_predictions(numpy_preds, coreml_preds))
+        
+        if os.path.exists(model_dir):
+            shutil.rmtree(model_dir)
+            
+    
+    def test_linear_activation_CPU(self):
+        
+        #create a tiny mlmodel
+        input_dim = (10,15,15)
+        input_features = [('data', datatypes.Array(*input_dim))]
+        output_features = [('output', None)]
+                
+        builder = neural_network.NeuralNetworkBuilder(input_features, output_features)
+                
+        builder.add_activation(name = 'activation', 
+                               non_linearity = 'LINEAR', 
+                               input_name = 'data', 
+                               output_name = 'output', params= [34.0, 67.0])
+                        
+        #save the model
+        model_dir = tempfile.mkdtemp()
+        model_path = os.path.join(model_dir, 'test_layer.mlmodel')                        
+        coremltools.utils.save_spec(builder.spec, model_path)
+        
+        #preprare input and get predictions
+        coreml_model = coremltools.models.MLModel(model_path)
+        x = np.random.rand(*input_dim)
+        coreml_input = {'data': x}
+        coreml_preds = coreml_model.predict(coreml_input, useCPUOnly = True)['output']
+        
+        #harcoded for this simple test case
+        numpy_preds = 34.0 * x + 67.0
         self.assertTrue(self._compare_shapes(numpy_preds, coreml_preds))
         self.assertTrue(self._compare_predictions(numpy_preds, coreml_preds))
         
         if os.path.exists(model_dir):
             shutil.rmtree(model_dir)        
-                                                       
+                                                           
                  
             
 class StressTest(CorrectnessTest):            
