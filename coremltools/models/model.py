@@ -238,7 +238,7 @@ class MLModel(object):
         >>> predictions = model.predict(data)
         """
         if self.__proxy__:
-            # return self.__proxy__.predict(data,useCPUOnly)
+            return self.__proxy__.predict(data,useCPUOnly)
             return self.__proxy__.predict(data)
         else:
             if _sys.platform != 'darwin' or float('.'.join(_platform.mac_ver()[0].split('.')[:2])) < 10.13:
