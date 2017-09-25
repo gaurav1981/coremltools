@@ -1762,6 +1762,12 @@ class KerasTopologyCorrectnessTest(KerasNumericCorrectnessTest):
         model.set_weights([np.random.rand(*w.shape) for w in model.get_weights()])
         self._test_keras_model(model, mode = 'random', delta=1e-4)
         
+    def test_identical_inputs_concat(self):
+        x = Input(shape=(3,))
+        y = concatenate([x,x,x])
+        model = Model([x], [y])
+        self._test_keras_model(model, mode = 'random', delta=1e-4)
+
     def test_intermediate_outputs_dense(self):
         x = Input(shape=(3,))
         y = Dense(4, name='intermediate_dense_y')(x)
